@@ -22,6 +22,11 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
+#include "engraving/compat/scoreaccess.h"
+#include "engraving/dom/bracket.h"
+#include "engraving/dom/instrtemplate.h"
 #include "engraving/dom/lyrics.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
@@ -31,6 +36,7 @@
 #include "engraving/dom/system.h"
 #include "engraving/dom/tuplet.h"
 #include "engraving/dom/note.h"
+#include "engraving/editing/editpart.h"
 
 #include "utils/scorerw.h"
 
@@ -161,4 +167,52 @@ TEST_F(Engraving_LayoutElementsTests, tstLayoutCrossStaffArp)
     EXPECT_FLOAT_EQ(staff1yPre, staff1yPost);
 
     delete score;
+}
+
+
+static void checkTwoStaffBrace(const String& instrumentId)
+{
+    const InstrumentTemplate* instrument = searchTemplate(instrumentId);
+    ASSERT_NE(instrument, nullptr);
+
+    std::unique_ptr<MasterScore> score(compat::ScoreAccess::createMasterScore(nullptr));
+    score->startCmd(muse::TranslatableString::untranslatable("Insert instrument for brace layout test"));
+    EditPart::insertPart(score.get(), instrument, 0);
+    score->endCmd();
+    score->appendMeasures(1);
+    score->setLayoutMode(LayoutMode::PAGE);
+    score->doLayout();
+
+    ASSERT_EQ(score->nstaves(), 2u);
+    EXPECT_EQ(score->staff(0)->clef(Fraction(0, 1)), ClefType::G);
+    EXPECT_EQ(score->staff(1)->clef(Fraction(0, 1)), ClefType::F);
+    ASSERT_EQ(score->style().styleSt(Sid::musicalSymbolFont), u"Leland");
+
+    ASSERT_EQ(score->systems().size(), 1u);
+    const System* system = score->systems().front();
+    ASSERT_TRUE(system->staff(0)->show());
+    ASSERT_TRUE(system->staff(1)->show());
+    ASSERT_EQ(system->brackets().size(), 1u);
+
+    const Bracket* brace = system->brackets().front();
+    EXPECT_EQ(brace->bracketType(), BracketType::BRACE);
+    EXPECT_EQ(brace->span(), 2u);
+    EXPECT_EQ(brace->firstStaff(), 0u);
+    EXPECT_EQ(brace->lastStaff(), 1u);
+    EXPECT_EQ(brace->ldata()->braceSymbol, SymId::brace);
+
+    const RectF bounds = brace->ldata()->bbox().translated(brace->pos());
+    ASSERT_TRUE(bounds.isValid());
+    EXPECT_DOUBLE_EQ(bounds.top(), system->staff(0)->bbox().top());
+    EXPECT_DOUBLE_EQ(bounds.bottom(), system->staff(1)->bbox().bottom());
+}
+
+TEST_F(Engraving_LayoutElementsTests, harpBraceSpansGrandStaff)
+{
+    checkTwoStaffBrace(u"harp");
+}
+
+TEST_F(Engraving_LayoutElementsTests, pianoBraceSpansGrandStaff)
+{
+    checkTwoStaffBrace(u"piano");
 }
