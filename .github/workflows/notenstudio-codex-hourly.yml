@@ -1,0 +1,78 @@
+name: Notenstudio Codex hourly (proposal only)
+
+on:
+  schedule:
+    - cron: '49 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notenstudio-codex-hourly
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    if: github.repository == 'Udo1604/Notenstudio'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          persist-credentials: false
+      - name: Check API key configuration
+        id: key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Set repository secret OPENAI_API_KEY to enable Codex."
+          fi
+      - name: Run Codex on a bounded task
+        if: steps.key.outputs.available == 'true'
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ':workspace'
+          output-file: codex-hourly-report.md
+          prompt: |
+            You are developing Notenstudio based on MuseScore Studio.
+            Inspect current checked-out commit and relevant tests before changes.
+            Choose ONE small, independent, verifiable improvement per run, prioritizing:
+            1. engraving: notehead/stem joins, beams, flags, slurs, SMuFL;
+            2. harp brace and page/system layout;
+            3. MusicXML/MXL/MIDI import/export regressions;
+            4. Windows UI only after the above.
+            A regression test is mandatory for every change.
+            Do not repeat existing work. Do not assume the local historical Notenstudio
+            v1.46 code is in this MuseScore repository.
+            If required references or toolchains are missing, state this and do not invent tests.
+            Do not change unrelated files, do not alter workflows, do not create secrets,
+            do not push, merge or open a PR. Keep changes minimal.
+            Execute relevant available tests. Record test commands, pass/fail and blockers.
+            Output a concise German report. If safe progress is not possible, make no edits.
+      - name: Package proposed patch and report
+        if: steps.key.outputs.available == 'true' && always()
+        shell: bash
+        run: |
+          git diff --binary > notenstudio-proposal.patch
+          git status --short > notenstudio-status.txt
+          if [ ! -f codex-hourly-report.md ]; then
+            printf 'Codex did not produce a final report; inspect workflow logs.\n' > codex-hourly-report.md
+          fi
+      - name: Upload proposal for manual review
+        if: steps.key.outputs.available == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notenstudio-codex-proposal-${{ github.run_id }}
+          path: |
+            notenstudio-proposal.patch
+            notenstudio-status.txt
+            codex-hourly-report.md
+          retention-days: 14
